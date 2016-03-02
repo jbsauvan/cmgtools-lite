@@ -1,11 +1,12 @@
 import pickle
 
-from CMGTools.H2TauTau.proto.plotter.PlotConfigs import HistogramCfg
+from CMGTools.H2TauTau.proto.plotter.PlotConfigs import HistogramCfg,BasicHistogramCfg
 from CMGTools.H2TauTau.proto.plotter.DataMCPlot import DataMCPlot
+from CMGTools.H2TauTau.proto.plotter.DataMCSysPlot import DataMCSysPlot
 
 from CMGTools.RootTools.DataMC.Histogram import Histogram
 
-from ROOT import TH1F
+from ROOT import TH1F, TFile, gROOT
 
 def initHist(hist, vcfg):
     hist.Sumw2()
@@ -15,11 +16,11 @@ def initHist(hist, vcfg):
     hist.GetXaxis().SetTitle(xtitle)
     hist.SetStats(False)
 
-def createHistogram(hist_cfg, all_stack=False, verbose=False):
+def createHistogram(hist_cfg, all_stack=False, sys=False, verbose=False):
     '''Method to create actual histogram (DataMCPlot) instance from histogram 
     config.
     '''
-    plot = DataMCPlot(hist_cfg.var.name)
+    plot = DataMCSysPlot(hist_cfg.var.name) if sys else DataMCPlot(hist_cfg.var.name)
     plot.lumi = hist_cfg.lumi
     vcfg = hist_cfg.var
     for cfg in hist_cfg.cfgs:
@@ -37,6 +38,30 @@ def createHistogram(hist_cfg, all_stack=False, verbose=False):
 
             if cfg.total_scale is not None:
                 total_hist.Scale(cfg.total_scale)
+        elif isinstance(cfg, BasicHistogramCfg):
+            print "Opening file", cfg.histo_file_name
+            histo_file = TFile.Open(cfg.histo_file_name)
+            print "Retrieving histo", cfg.histo_name
+            hist = histo_file.Get(cfg.histo_name)
+            hist.__class__ = TH1F
+            hist.SetDirectory(0)
+            hist.SetTitle("")
+            initHist(hist, vcfg)
+            histo_file.Close()
+            gROOT.cd()
+            #
+            stack = all_stack or (not cfg.is_data and not cfg.is_signal)
+            #
+            if cfg.rebin>1: hist.Rebin(cfg.rebin)
+            hist.Scale(cfg.scale)
+            #
+            if cfg.name in plot:
+                plot[cfg.name].Add(Histogram(cfg.name, hist))
+            else:
+                plot_hist = plot.AddHistogram(cfg.name, hist, stack=stack)
+
+            if not cfg.is_data:
+                plot_hist.SetWeight(hist_cfg.lumi*cfg.xsec/cfg.sumweights) 
         else:
             # It's a sample cfg
             hname = '_'.join([hist_cfg.name, cfg.name, vcfg.name, cfg.dir_name])
